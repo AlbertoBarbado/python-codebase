@@ -62,7 +62,7 @@ class ModelInference:
 
         # Load tokenizer and model
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForCausalLM.from_pretrained(model_name)
+        self.model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True)
         self.model.to(self.device)
 
     def llm_call(
@@ -94,8 +94,12 @@ class ModelInference:
         # Generate text using the model
         outputs = self.model.generate(
             inputs["input_ids"],
+            attention_mask=inputs["attention_mask"],
             max_length=max_length,
             temperature=temperature,
+            repetition_penalty=1.5,  # Avoid repetition.
+            #early_stopping=True,  # The model can stop before reach the max_length,
+            do_sample=True,
             pad_token_id=self.tokenizer.eos_token_id
         )
         response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
