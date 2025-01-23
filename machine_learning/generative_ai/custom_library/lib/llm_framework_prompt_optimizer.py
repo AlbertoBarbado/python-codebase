@@ -1,20 +1,21 @@
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Callable
+
 from lib.utils import extract_xml
-from lib.llm_tools import llm_call
 
 def execute_task(
     prompt: str,
     tasks: List[str],
     context: str,
+    model: object,
     dct_params: dict,
     debug_mode=True
     ) -> tuple[List[str], List[str]]:
     """Execute a batch of tasks using the given prompt and context."""
 
     # Fixed prompt
-    output_structure = """
+    OUTPUT_STRUCTURE = """
     Output your answer concisely in the following XML format, using only these elements, and without repeating input information:
 
     <thoughts> Your understanding of the task and how do you plan to solve it </thoughts>
@@ -25,12 +26,12 @@ def execute_task(
     thoughts_list = []
 
     for task in tasks:
-        full_prompt = f"{prompt}\n{output_structure}\n{context}\nTask: {task}" if context else f"{prompt}\n{output_structure}\nTask: {task}"
+        FULL_PROMPT = f"{prompt}\n{OUTPUT_STRUCTURE}\n{context}\nTask: {task}" if context else f"{prompt}\n{OUTPUT_STRUCTURE}\nTask: {task}"
         print("\n=== TASK EXECUTION INPUT START ===")
-        print(f"Full prompt:\n{full_prompt}\n")
+        print(f"Full prompt:\n{FULL_PROMPT}\n")
         print("\n=== TASK EXECUTION INPUT END ===")
 
-        response = llm_call(full_prompt, **dct_params)
+        response = model.generate(FULL_PROMPT, **dct_params)
         thoughts = extract_xml(response, "thoughts")
         result = extract_xml(response, "response")
 
@@ -55,12 +56,13 @@ def refine_prompt(
     outputs: List[str],
     memory: List[str],
     targets: List[str],
+    model: object,
     dct_params: dict
     ) -> str:
     """Refine the system prompt based on the system prompt, tasks, outputs by another LLM, memory and target outputs"""
 
     # Fixed prompt
-    engineer_prompt = """
+    ENGINEER_PROMPT = """
       You are a prompt engineering expert.
 
       1. Task:
@@ -82,24 +84,7 @@ def refine_prompt(
       <thoughts> Your understanding of the task and feedback and how you plan to improve </thoughts>
       <refined_prompt> Improved prompt </refined_prompt>
     """
-
-    '''
-    context = "\n".join([
-        "Input system prompt:",
-        *[input_system_prompt],
-        "\nTasks:",
-        *[f"- {task}" for task in tasks],
-        "\nGenerated outputs:",
-        *[f"- {output}" for output in outputs],
-        "\nMemory:",
-        *[f"- {m}" for m in memory],
-        "\nTarget outputs:",
-        *[f"- {target}" for target in targets]
-    ])
-
-    full_prompt = f"{engineer_prompt}\n{context}"
-    '''
-    context = f"""
+    CONTEXT_PROMPT = f"""
     4. Input information (results from another LLM):
     <input_system_prompt> {input_system_prompt} </input_system_prompt>
     <tasks> {tasks} </tasks>
@@ -108,13 +93,13 @@ def refine_prompt(
     <target_outputs> {targets} </target_outputs>
     """
 
-    full_prompt = f"{engineer_prompt}\n{context}"
+    full_prompt = f"{ENGINEER_PROMPT}\n{CONTEXT_PROMPT}"
 
     print("\n=== PROMPT ENGINEERING INPUT START ===")
     print(f"Full prompt:\n{full_prompt}\n")
     print("\n=== PROMPT ENGINEERING INPUT END ===")
 
-    response = llm_call(full_prompt, **dct_params)
+    response = model.generate(full_prompt, **dct_params)
     refined_prompt = extract_xml(response, "refined_prompt")
     evaluation = extract_xml(response, "evaluation")
 
@@ -129,6 +114,7 @@ def iterative_task_execution(
     tasks: List[str],
     initial_prompt: str,
     target_outputs: List[str],
+    model: object,
     dct_params: dict,
     n_max_iter: int = 5,
     debug_mode: bool = True
@@ -151,6 +137,7 @@ def iterative_task_execution(
             prompt = current_system_prompt,
             tasks = tasks,
             context = context,
+            model = model,
             dct_params = dct_params
         )
         memory.extend(results)
@@ -163,6 +150,7 @@ def iterative_task_execution(
             memory = memory,
             outputs = results,
             targets = target_outputs,
+            model = model,
             dct_params = dct_params
         )
 
@@ -192,6 +180,9 @@ def prepare_input(
     target_key: str,
     max_inputs_per_prompt = 1 # Set the maximum number of input instances per prompt
     ):
+    PROMPT_TARGET_TASK = "Apply the task for the following instances:"
+    PROMPT_TARGET_TEXT = "The target references are:"
+
     batch = [{input_key: sample[input_key], target_key: sample[target_key]} for sample in dct_input]
 
     # Prepare tasks and target summaries based on max_docs_per_prompt
@@ -201,12 +192,12 @@ def prepare_input(
     for start_idx in range(0, len(batch), max_inputs_per_prompt):
         sub_batch = batch[start_idx:start_idx + max_inputs_per_prompt]
 
-        task_text = "Apply the task for the following instances:"
+        task_text = PROMPT_TARGET_TASK
         for i, item in enumerate(sub_batch):
             task_text += f"\n{i + 1}. {item[input_key]}"
         tasks.append(task_text)
 
-        target_text = "The target references are:"
+        target_text = PROMPT_TARGET_TEXT
         for i, sample in enumerate(sub_batch):
             target_text += f"\n{i + 1}. {sample[target_key]}"
         target_texts.append(target_text)

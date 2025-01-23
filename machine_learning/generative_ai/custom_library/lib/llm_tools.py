@@ -1,111 +1,141 @@
 import torch
+import transformers
 from huggingface_hub import InferenceClient
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
-def llm_call(
-    prompt: str,
-    system_prompt: str = "",
-    model: str = "Qwen/Qwen2.5-72B-Instruct",
-    max_new_tokens: int = 1000,
-    temperature: float = 0.1,
-    return_full_text: bool = False,
-    ) -> str:
-    """
-    Calls the model with the given prompt and returns the response.
-
-    NOTE: Uses HF Inference API
-
-    Args:
-        prompt (str): The user prompt to send to the model.
-        system_prompt (str, optional): The system prompt to send to the model. Defaults to "".
-        model (str, optional): The model to use for the call. Defaults to "claude-3-5-sonnet-20241022".
-
-    Returns:
-        str: The response from the language model.
-    """
-    dct_params = {
-        'model': model,
-        'max_new_tokens': max_new_tokens,
-        'temperature': temperature,
-        'return_full_text': return_full_text
-        }
-    client = InferenceClient()
-    if system_prompt != "":
-        input_prompt = system_prompt + '\n\n' + prompt
-    else:
-        input_prompt = prompt
-    response = client.text_generation(input_prompt, **dct_params)
-    return response
-
-
-class ModelInference:
-    def __init__(
+class HuggingFaceWrapperAPI:
+  def __init__(
         self,
         model_name: str = "MiniLLM/MiniPLM-Qwen-500M",
         device: str = None
         ):
         """
-        Initialize the model and tokenizer.
+        Initialize parameters.
 
         Args:
-            model_name (str): Name of the pre-trained model to load (e.g., 'gpt2').
+            model_name (str): Name of the pre-trained model to use (e.g., 'gpt2').
             device (str, optional): Device to load the model on ('cpu', 'cuda', or None). Defaults to None.
-
-        # Example usage:
-        # model_inference = ModelInference("gpt2")
-        # result = model_inference.llm_call("Once upon a time")
-        # print(result)
-
         """
         self.model_name = model_name
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
 
-        # Load tokenizer and model
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True)
-        self.model.to(self.device)
+  def generate(
+      self,
+      prompt: str,
+      system_prompt: str = "",
+      max_new_tokens: int = 1000,
+      temperature: float = 0.1,
+      return_full_text: bool = False,
+      ) -> str:
+      """
+      TODO
+      """
+      dct_params = {
+          'model': self.model_name,
+          'max_new_tokens': max_new_tokens,
+          'temperature': temperature,
+          'return_full_text': return_full_text
+          }
+      client = InferenceClient()
+      if system_prompt != "":
+          input_prompt = system_prompt + '\n\n' + prompt
+      else:
+          input_prompt = prompt
+      response = client.text_generation(input_prompt, **dct_params)
+      return response
 
-    def llm_call(
-            self,
-            prompt: str,
-            system_prompt: str = "",
-            max_length: int = 1000,
-            temperature: float = 0.1,
-            return_full_text: bool = False
-            ):
+  def load_model(self):
+        return self.model
+
+
+class HuggingFaceModelLoad:
+  def __init__(
+        self,
+        model_name: str = "MiniLLM/MiniPLM-Qwen-500M",
+        device: str = None,
+        use_quantization = True
+        ):
         """
-        Generate text based on a prompt using the model.
-
-        Args:
-            prompt (str): The input prompt for the model.
-            max_length (int): Maximum length of the generated sequence.
-            temperature (float): Sampling temperature; higher values result in more random outputs.
-
-        Returns:
-            str: The generated text.
+        TODO
         """
-        # Encode the input prompt
-        if system_prompt != "":
-            input_prompt = system_prompt + '\n\n' + prompt
+        self.model_name = model_name
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+
+        # Tokenizer setup
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.tokenizer = tokenizer
+
+        # Model setup
+        if use_quantization:
+          quantization_config = BitsAndBytesConfig(
+              load_in_4bit=True,
+              bnb_4bit_compute_dtype=torch.float16,
+              bnb_4bit_quant_type="nf4",
+              bnb_4bit_use_double_quant=True,
+          )
+          self.model = AutoModelForCausalLM.from_pretrained(
+              self.model_name,
+              device_map=self.device,
+              quantization_config=quantization_config,
+          )
         else:
-            input_prompt = prompt
-        inputs = self.tokenizer(input_prompt, return_tensors="pt").to(self.device)
+          self.model = AutoModelForCausalLM.from_pretrained(
+              self.model_name,
+              trust_remote_code=True
+              )
 
-        # Generate text using the model
-        outputs = self.model.generate(
-            inputs["input_ids"],
-            attention_mask=inputs["attention_mask"],
-            max_length=max_length,
-            temperature=temperature,
-            repetition_penalty=1.5,  # Avoid repetition.
-            #early_stopping=True,  # The model can stop before reach the max_length,
-            do_sample=True,
-            pad_token_id=self.tokenizer.eos_token_id
-        )
-        response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-        if not return_full_text:
-            response = response.split(input_prompt)[-1]
+  def load_model(self):
+      return self.model
 
-        # Decode and return the generated text
-        return response
+  def generate(
+      self,
+      prompt: str,
+      system_prompt: str = "",
+      max_new_tokens: int = 1000,
+      temperature: float = 0.1,
+      return_full_text: bool = False,
+      ):
+      """
+      TODO
+      """
+      model = self.load_model()
+      pipeline = transformers.pipeline(
+          "text-generation",
+          model=model,
+          tokenizer=self.tokenizer,
+          use_cache=True,
+          device_map=self.device,
+          max_new_tokens=max_new_tokens,
+          temperature=temperature,
+          do_sample=True,
+          truncation=True,
+          num_return_sequences=1,
+          eos_token_id=self.tokenizer.eos_token_id,
+          pad_token_id=self.tokenizer.eos_token_id,
+      )
+      self.pipeline = pipeline
 
+      # Encode the input prompt
+      '''
+      # OLD VERSION
+      if system_prompt != "":
+          input_prompt = system_prompt + '\n\n' + prompt
+      else:
+          input_prompt = prompt
+      # Generate output
+      output_dict = pipeline(input_prompt)
+      if return_full_text:
+        output = output_dict[0]["generated_text"]
+      else:
+        output = output_dict[0]["generated_text"][len(input_prompt):]
+      return output
+      '''
+      messages = [
+          {"role": "system", "content": system_prompt},
+          {"role": "user", "content": prompt},
+      ]
+
+      # Generate output
+      output_dict = pipeline(messages)
+      output = output_dict[0]['generated_text'][-1]['content']
+      return output
