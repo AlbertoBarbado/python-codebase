@@ -8,3 +8,5 @@ bitsandbytes==0.45.0
 deepeval==2.1.1
 lm-format-enforcer==0.10.9
 pydantic==2.10.4
+evaluate[sacrebleu,rouge_score,bert_score]==0.4.3
+
