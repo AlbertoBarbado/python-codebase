@@ -205,6 +205,7 @@ class HuggingFaceModelLoadAsync:
             num_return_sequences=1,
             eos_token_id=self.tokenizer.eos_token_id,
             pad_token_id=self.tokenizer.eos_token_id,
+            trust_remote_code=True
         )
         self.pipeline = pipeline
 
@@ -248,6 +249,7 @@ class HuggingFaceModelLoadAsync:
             num_return_sequences=1,
             eos_token_id=self.tokenizer.eos_token_id,
             pad_token_id=self.tokenizer.eos_token_id,
+            trust_remote_code=True
         )
         self.pipeline = pipeline
 
